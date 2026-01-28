@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { Search, Settings, X, Check, RefreshCw, ArrowUpDown } from "lucide-react";
+import { Search, Settings, X, Check, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable } from "@/components/DataTable";
 import { AppointmentModal } from "@/components/AppointmentModal";
 import { AppointmentSettingsModal } from "@/components/AppointmentSettingsModal";
+import { ConfirmationModal } from "@/components/ConfirmationModal";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
@@ -41,11 +42,19 @@ export default function AgendamentosPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{
+    title: string;
+    description: string;
+    variant: "default" | "danger" | "success";
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");  // Mude o valor inicial para "all"
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFilter, setDateFilter] = useState<string>("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   const isMobile = useMediaQuery("(max-width: 768px)");
   const isAdmin = user?.role === "ADMIN";
@@ -58,7 +67,7 @@ export default function AgendamentosPage() {
     fetchAppointments({
       page: currentPage,
       limit: 10,
-      status: statusFilter === "all" ? undefined : statusFilter as any,  // Trate "all" como undefined (sem filtro)
+      status: statusFilter === "all" ? undefined : statusFilter as any,
       search: searchTerm,
       date: dateFilter,
     });
@@ -71,31 +80,51 @@ export default function AgendamentosPage() {
     }
   };
 
-  const handleCancelAppointment = async (id: string) => {
-    if (confirm("Tem certeza que deseja cancelar este agendamento?")) {
-      await cancelAppointment(id);
-    }
+  const handleCancelAppointment = (id: string, appointmentName: string) => {
+    setConfirmModalConfig({
+      title: isAdmin ? "Recusar Agendamento" : "Cancelar Agendamento",
+      description: isAdmin
+        ? `Tem certeza que deseja recusar o agendamento de ${appointmentName}?`
+        : `Tem certeza que deseja cancelar este agendamento?`,
+      variant: "danger",
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          await cancelAppointment(id);
+          setConfirmModalOpen(false);
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
+    setConfirmModalOpen(true);
   };
 
-  const handleConfirmAppointment = async (id: string) => {
-    if (confirm("Confirmar este agendamento?")) {
-      await confirmAppointment(id);
-    }
+  const handleConfirmAppointment = (id: string, appointmentName: string) => {
+    setConfirmModalConfig({
+      title: "Aprovar Agendamento",
+      description: `Confirmar o agendamento de ${appointmentName}?`,
+      variant: "success",
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          await confirmAppointment(id);
+          setConfirmModalOpen(false);
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
+    setConfirmModalOpen(true);
   };
 
   const handleSaveSettings = async (rooms: any[]) => {
-    // Implementar salvamento de configurações
     console.log("Salvando configurações:", rooms);
   };
 
   const handleRefresh = () => {
     refreshAppointments();
   };
-
-  const handleToggleSort = () => {
-    setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-  };
-
 
   return (
     <DashboardLayout>
@@ -117,7 +146,6 @@ export default function AgendamentosPage() {
               </p>
             </div>
 
-            {/* Botão - Posicionado no header */}
             <div className="hidden md:block">
               {isAdmin ? (
                 <Button
@@ -141,10 +169,9 @@ export default function AgendamentosPage() {
 
         <Card className="bg-white rounded-lg shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden">
           <CardContent className="p-4 md:p-8 flex flex-col flex-1">
-            {/* Filtros e Busca */}
+            {/* Filtros */}
             <div className="flex flex-col gap-4 mb-6 md:mb-8">
               <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4">
-                {/* Busca */}
                 <div className="relative flex-1 max-w-md">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
                   <Input
@@ -155,7 +182,6 @@ export default function AgendamentosPage() {
                   />
                 </div>
 
-                {/* Data */}
                 <Input
                   placeholder="Selecione"
                   className="h-11 w-full md:w-48"
@@ -164,10 +190,18 @@ export default function AgendamentosPage() {
                   onChange={(e) => setDateFilter(e.target.value)}
                 />
 
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="h-11 w-full md:w-48">
+                    <SelectValue placeholder="Todos os status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="analise">Em análise</SelectItem>
+                    <SelectItem value="agendado">Agendado</SelectItem>
+                    <SelectItem value="cancelado">Cancelado</SelectItem>
+                  </SelectContent>
+                </Select>
 
-
-
-                {/* Botão Atualizar */}
                 <Button
                   onClick={handleRefresh}
                   variant="outline"
@@ -179,7 +213,6 @@ export default function AgendamentosPage() {
                 </Button>
               </div>
 
-              {/* Botão mobile */}
               <div className="md:hidden">
                 {isAdmin ? (
                   <Button
@@ -211,13 +244,7 @@ export default function AgendamentosPage() {
             ) : (
               <>
                 <DataTable
-                  columns={[
-                    "Data e hora",
-                    "Nome",
-                    "Sala de agendamento",
-                    "Status",
-                    "Ação"
-                  ]}
+                  columns={["Data e hora", "Nome", "Sala de agendamento", "Status", "Ação"]}
                   data={appointments}
                   renderRow={(appointment: Appointment) => (
                     <>
@@ -253,7 +280,10 @@ export default function AgendamentosPage() {
                                   <Button
                                     size="icon"
                                     variant="ghost"
-                                    onClick={() => handleConfirmAppointment(appointment.id)}
+                                    onClick={() => handleConfirmAppointment(
+                                      appointment.id,
+                                      `${appointment.user?.name} ${appointment.user?.surname}`
+                                    )}
                                     className="h-8 w-8 rounded-full bg-green-100 hover:bg-green-200"
                                     title="Aprovar"
                                   >
@@ -262,7 +292,10 @@ export default function AgendamentosPage() {
                                   <Button
                                     size="icon"
                                     variant="ghost"
-                                    onClick={() => handleCancelAppointment(appointment.id)}
+                                    onClick={() => handleCancelAppointment(
+                                      appointment.id,
+                                      `${appointment.user?.name} ${appointment.user?.surname}`
+                                    )}
                                     className="h-8 w-8 rounded-full bg-red-100 hover:bg-red-200"
                                     title="Recusar"
                                   >
@@ -277,7 +310,10 @@ export default function AgendamentosPage() {
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  onClick={() => handleCancelAppointment(appointment.id)}
+                                  onClick={() => handleCancelAppointment(
+                                    appointment.id,
+                                    ""
+                                  )}
                                   className="h-8 w-8 rounded-full bg-black hover:bg-gray-800"
                                   title="Cancelar"
                                 >
@@ -316,7 +352,10 @@ export default function AgendamentosPage() {
                             <>
                               <Button
                                 size="sm"
-                                onClick={() => handleConfirmAppointment(appointment.id)}
+                                onClick={() => handleConfirmAppointment(
+                                  appointment.id,
+                                  `${appointment.user?.name} ${appointment.user?.surname}`
+                                )}
                                 className="bg-green-600 hover:bg-green-700"
                               >
                                 Aprovar
@@ -324,7 +363,10 @@ export default function AgendamentosPage() {
                               <Button
                                 size="sm"
                                 variant="destructive"
-                                onClick={() => handleCancelAppointment(appointment.id)}
+                                onClick={() => handleCancelAppointment(
+                                  appointment.id,
+                                  `${appointment.user?.name} ${appointment.user?.surname}`
+                                )}
                               >
                                 Recusar
                               </Button>
@@ -335,7 +377,7 @@ export default function AgendamentosPage() {
                             <Button
                               size="sm"
                               variant="destructive"
-                              onClick={() => handleCancelAppointment(appointment.id)}
+                              onClick={() => handleCancelAppointment(appointment.id, "")}
                             >
                               Cancelar
                             </Button>
@@ -395,7 +437,7 @@ export default function AgendamentosPage() {
         </Card>
       </div>
 
-      {/* Modal de Agendamento - Apenas para Cliente */}
+      {/* Modals */}
       {!isAdmin && (
         <AppointmentModal
           open={modalOpen}
@@ -404,12 +446,25 @@ export default function AgendamentosPage() {
         />
       )}
 
-      {/* Modal de Configurações - Apenas para Admin */}
       {isAdmin && (
         <AppointmentSettingsModal
           open={settingsModalOpen}
           onClose={() => setSettingsModalOpen(false)}
           onSave={handleSaveSettings}
+        />
+      )}
+
+      {confirmModalConfig && (
+        <ConfirmationModal
+          open={confirmModalOpen}
+          onClose={() => setConfirmModalOpen(false)}
+          onConfirm={confirmModalConfig.onConfirm}
+          title={confirmModalConfig.title}
+          description={confirmModalConfig.description}
+          variant={confirmModalConfig.variant}
+          loading={actionLoading}
+          confirmText="Confirmar"
+          cancelText="Cancelar"
         />
       )}
     </DashboardLayout>

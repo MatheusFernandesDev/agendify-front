@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, CalendarDays, MapPin, Clock } from "lucide-react";
+import { Search, CalendarDays, MapPin, Clock, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable } from "@/components/DataTable";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
+import { ConfirmationModal } from "@/components/ConfirmationModal";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/utils/formatters";
@@ -21,6 +22,7 @@ export default function ClientsPage() {
     clients,
     pagination,
     fetchClients,
+    refreshClients,
     toggleClientStatus,
     updateClientPermissions
   } = useUser();
@@ -30,10 +32,18 @@ export default function ClientsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedDate, setSelectedDate] = useState("");
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{
+    title: string;
+    description: string;
+    variant: "default" | "danger" | "success";
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     loadClients();
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, selectedDate]);
 
   const loadClients = () => {
     fetchClients({
@@ -43,27 +53,58 @@ export default function ClientsPage() {
     });
   };
 
-  const handleToggleStatus = async (clientId: string) => {
-    const success = await toggleClientStatus(clientId);
-    if (success) {
-      // O estado já foi atualizado pelo hook
-    }
+  const handleToggleStatus = (client: User) => {
+    setConfirmModalConfig({
+      title: client.isActive ? "Desativar Cliente" : "Ativar Cliente",
+      description: client.isActive
+        ? `Tem certeza que deseja desativar ${client.name} ${client.surname}? O cliente não poderá mais acessar o sistema.`
+        : `Tem certeza que deseja ativar ${client.name} ${client.surname}?`,
+      variant: client.isActive ? "danger" : "success",
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          await toggleClientStatus(client.id);
+          setConfirmModalOpen(false);
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
+    setConfirmModalOpen(true);
   };
 
-  const handleTogglePermission = async (
-    clientId: string,
+  const handleTogglePermission = (
+    client: User,
     permissionType: 'appointments' | 'logs',
     currentValue: boolean
   ) => {
-    const client = clients.find(c => c.id === clientId);
-    if (!client) return;
+    const permissionName = permissionType === 'appointments' ? 'Agendamentos' : 'Logs';
 
-    const newPermissions = {
-      ...client.permissions,
-      [permissionType]: !currentValue
-    };
+    setConfirmModalConfig({
+      title: currentValue ? `Remover Permissão de ${permissionName}` : `Conceder Permissão de ${permissionName}`,
+      description: currentValue
+        ? `Remover a permissão de ${permissionName} de ${client.name} ${client.surname}?`
+        : `Conceder a permissão de ${permissionName} para ${client.name} ${client.surname}?`,
+      variant: currentValue ? "danger" : "success",
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          const newPermissions = {
+            ...client.permissions,
+            [permissionType]: !currentValue
+          };
+          await updateClientPermissions(client.id, newPermissions);
+          setConfirmModalOpen(false);
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
+    setConfirmModalOpen(true);
+  };
 
-    await updateClientPermissions(clientId, newPermissions);
+  const handleRefresh = () => {
+    refreshClients();
   };
 
   return (
@@ -97,16 +138,22 @@ export default function ClientsPage() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-              <div className="relative">
-                <CalendarDays className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 pointer-events-none" />
-                <Input
-                  placeholder="Selecione"
-                  className="pr-10 h-11 w-48"
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                />
-              </div>
+              <Input
+                placeholder="Selecione"
+                className="h-11 w-full md:w-48"
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+              />
+              <Button
+                onClick={handleRefresh}
+                variant="outline"
+                size="icon"
+                className="h-11 w-11 shrink-0"
+                title="Atualizar"
+              >
+                <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              </Button>
             </div>
 
             {/* Tabela */}
@@ -124,12 +171,10 @@ export default function ClientsPage() {
                   data={clients}
                   renderRow={(client: User) => (
                     <>
-                      {/* Data de cadastro */}
                       <td className="py-4 px-4 text-[#000000] font-medium">
                         {formatDateTime(client.createdAt)}
                       </td>
 
-                      {/* Nome */}
                       <td className="py-4 px-4 text-[#000000]">
                         <div className="flex flex-col">
                           <span className="font-semibold">
@@ -141,17 +186,15 @@ export default function ClientsPage() {
                         </div>
                       </td>
 
-                      {/* Endereço */}
                       <td className="py-4 px-4 text-[#000000] text-sm">
                         {client.address}
                       </td>
 
-                      {/* Permissões */}
                       <td className="py-4 px-4">
                         <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => handleTogglePermission(
-                              client.id,
+                              client,
                               'appointments',
                               client.permissions.appointments
                             )}
@@ -166,7 +209,7 @@ export default function ClientsPage() {
                           </button>
                           <button
                             onClick={() => handleTogglePermission(
-                              client.id,
+                              client,
                               'logs',
                               client.permissions.logs
                             )}
@@ -182,18 +225,17 @@ export default function ClientsPage() {
                         </div>
                       </td>
 
-                      {/* Status */}
                       <td className="py-4 px-4">
                         <button
-                          onClick={() => handleToggleStatus(client.id)}
+                          onClick={() => handleToggleStatus(client)}
                           className={cn(
                             "w-12 h-6 rounded-full relative transition-colors cursor-pointer",
-                            client.status ? "bg-black" : "bg-gray-300"
+                            client.isActive ? "bg-black" : "bg-gray-300"
                           )}
                         >
                           <div className={cn(
                             "absolute top-1 w-4 h-4 rounded-full bg-white transition-transform",
-                            client.status ? "right-1" : "left-1"
+                            client.isActive ? "right-1" : "left-1"
                           )} />
                         </button>
                       </td>
@@ -209,15 +251,15 @@ export default function ClientsPage() {
                           <p className="text-xs text-gray-500 capitalize">{client.role}</p>
                         </div>
                         <button
-                          onClick={() => handleToggleStatus(client.id)}
+                          onClick={() => handleToggleStatus(client)}
                           className={cn(
                             "w-12 h-6 rounded-full relative transition-colors",
-                            client.status ? "bg-black" : "bg-gray-300"
+                            client.isActive ? "bg-black" : "bg-gray-300"
                           )}
                         >
                           <div className={cn(
                             "absolute top-1 w-4 h-4 rounded-full bg-white transition-transform",
-                            client.status ? "right-1" : "left-1"
+                            client.isActive ? "right-1" : "left-1"
                           )} />
                         </button>
                       </div>
@@ -232,7 +274,7 @@ export default function ClientsPage() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => handleTogglePermission(
-                            client.id,
+                            client,
                             'appointments',
                             client.permissions.appointments
                           )}
@@ -247,7 +289,7 @@ export default function ClientsPage() {
                         </button>
                         <button
                           onClick={() => handleTogglePermission(
-                            client.id,
+                            client,
                             'logs',
                             client.permissions.logs
                           )}
@@ -318,6 +360,21 @@ export default function ClientsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Modal de Confirmação */}
+      {confirmModalConfig && (
+        <ConfirmationModal
+          open={confirmModalOpen}
+          onClose={() => setConfirmModalOpen(false)}
+          onConfirm={confirmModalConfig.onConfirm}
+          title={confirmModalConfig.title}
+          description={confirmModalConfig.description}
+          variant={confirmModalConfig.variant}
+          loading={actionLoading}
+          confirmText="Confirmar"
+          cancelText="Cancelar"
+        />
+      )}
     </DashboardLayout>
   );
 }

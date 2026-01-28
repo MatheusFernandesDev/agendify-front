@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "@/services/api";
-import { toast } from "sonner"
+import { toast } from "sonner";
 
 interface User {
   id: string;
@@ -29,24 +29,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  useEffect(() => {
-    function loadStorageData() {
-      const token = localStorage.getItem("@Agendify:token");
-      const storedUser = localStorage.getItem("@Agendify:user");
+  // Função para limpar dados e fazer logout
+  const handleLogout = () => {
+    localStorage.removeItem("@Agendify:token");
+    localStorage.removeItem("@Agendify:user");
+    delete api.defaults.headers.Authorization;
+    setUser(null);
+    router.push("/clientLogin");
+  };
 
-      if (token && storedUser) {
-        api.defaults.headers.Authorization = `Bearer ${token}`;
-        setUser(JSON.parse(storedUser));
+  useEffect(() => {
+    // Configurar interceptor de resposta para capturar erros 401 (token expirado)
+    const interceptor = api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          toast.error("Sessão expirada. Faça login novamente.", { position: "top-right" });
+          handleLogout();
+        }
+        return Promise.reject(error);
       }
-      // Seta loading como false somente APÓS checar o storage
-      setLoading(false);
+    );
+
+    return () => {
+      api.interceptors.response.eject(interceptor);
+    };
+  }, []);
+
+  useEffect(() => {
+    async function loadStorageData() {
+      try {
+        const token = localStorage.getItem("@Agendify:token");
+        const storedUser = localStorage.getItem("@Agendify:user");
+
+        if (token && storedUser) {
+          api.defaults.headers.Authorization = `Bearer ${token}`;
+
+          // Verifica se o token ainda é válido fazendo uma requisição simples
+          try {
+            await api.get("/api/auth/me");
+            setUser(JSON.parse(storedUser));
+          } catch (err) {
+            // Token inválido ou expirado
+            handleLogout();
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao carregar dados do storage:", error);
+        handleLogout();
+      } finally {
+        setLoading(false);
+      }
     }
 
     loadStorageData();
   }, []);
 
   useEffect(() => {
-    // Se ainda está carregando o localStorage, não faz nada
     if (loading) return;
 
     const publicPaths = ["/login", "/clientLogin", "/cadastro"];
@@ -55,18 +94,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user && !isPublicPath) {
       router.push("/clientLogin");
     } else if (user && isPublicPath) {
-      // Evita loop se já estiver no dashboard
       if (pathname !== "/dashboard/agendamentos") {
         router.push("/dashboard/agendamentos");
       }
     }
   }, [user, loading, pathname]);
 
-
   async function signIn({ email, password }: any) {
     try {
       const response = await api.post("/api/auth/login", { email, password });
-
       const { data: { token, user: userData } } = response.data;
 
       if (!token || !userData) {
@@ -81,16 +117,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       toast.success("Login efetuado com sucesso", { position: "top-right" });
       router.push("/dashboard/agendamentos");
     } catch (err: any) {
-      const errorMessage = err.response?.data?.message || "Erro desconhecido no login. Tente novamente.";
+      const errorMessage = err.response?.data?.message || "Erro ao fazer login. Verifique suas credenciais.";
       toast.error(errorMessage, { position: "top-right" });
     }
   }
 
   function signOut() {
-    localStorage.removeItem("@Agendify:token");
-    localStorage.removeItem("@Agendify:user");
-    setUser(null);
-    router.push("/login");
+    handleLogout();
   }
 
   return (

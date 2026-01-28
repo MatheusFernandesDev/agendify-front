@@ -180,7 +180,7 @@ export function useUser(): UseUserReturn {
     try {
       setLoading(true);
       const response = await userService.toggleStatus(id);
-      toast.success(response.message || 'Status do cliente atualizado');
+      toast.success(response.message || 'Status do cliente atualizado', { position: "top-right" });
       
       // Atualiza o status do cliente na lista local
       setClients(prev =>
@@ -225,7 +225,7 @@ export function useUser(): UseUserReturn {
     try {
       setLoading(true);
       const response = await userService.delete(id);
-      toast.success(response.message || 'Cliente deletado com sucesso');
+      toast.success(response.message || 'Cliente deletado com sucesso', { position: "top-right" });
       
       // Remove o cliente da lista local
       setClients(prev => prev.filter(client => client.id !== id));

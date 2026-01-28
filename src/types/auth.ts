@@ -16,7 +16,7 @@ export interface User {
     appointments: boolean;
     logs: boolean;
   };
-  status: boolean
+  isActive: boolean
  
 }
 
